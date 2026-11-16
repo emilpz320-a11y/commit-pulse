@@ -1,0 +1,19 @@
+{
+  "name": "commit-pulse",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Commit Pulse: stamp every git commit with the pulse and breathing the SmartSpectra SDK reads from your webcam, then see which files raise your heart rate.",
+  "main": "server.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "@smartspectra/node-sdk": "3.5.0",
+    "jpeg-js": "^0.4.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

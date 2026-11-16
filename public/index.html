@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Commit Pulse</title>
+<style>
+  :root { --bg:#0f1117; --panel:#171a23; --line:#262b38; --fg:#e8ebf2; --dim:#8a91a6; --accent:#ff5c7a; --ok:#3fb950; --warn:#f0b429; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui, Segoe UI, sans-serif; }
+  header { display:flex; align-items:center; gap:14px; padding:18px 28px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:20px; margin:0; letter-spacing:.3px; }
+  .heart { color:var(--accent); display:inline-block; animation:beat 1s infinite; }
+  @keyframes beat { 0%,100%{transform:scale(1)} 15%{transform:scale(1.25)} 30%{transform:scale(1)} }
+  .pill { font-size:12px; padding:3px 10px; border-radius:99px; background:var(--line); color:var(--dim); }
+  .pill.sim { background:#5a3b00; color:#ffd27a; }
+  main { display:grid; grid-template-columns: 340px 1fr; gap:18px; padding:20px 28px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; }
+  .big { font-size:64px; font-weight:700; line-height:1; }
+  .unit { color:var(--dim); font-size:16px; margin-left:6px; }
+  .row { display:flex; gap:22px; align-items:baseline; }
+  .mood { font-size:22px; margin-top:10px; }
+  .dim { color:var(--dim); }
+  .hint { color:var(--warn); min-height:22px; margin-top:6px; }
+  canvas { width:100%; height:170px; display:block; }
+  button { background:#232838; color:var(--fg); border:1px solid #343b50; border-radius:8px; padding:8px 14px; font:inherit; cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#1a0006; font-weight:600; }
+  input { background:#0c0e14; color:var(--fg); border:1px solid #343b50; border-radius:8px; padding:8px 10px; font:inherit; width:100%; }
+  table { width:100%; border-collapse:collapse; margin-top:10px; }
+  td, th { padding:7px 8px; border-bottom:1px solid var(--line); text-align:left; font-size:14px; }
+  th { color:var(--dim); font-weight:500; }
+  .bar { height:8px; border-radius:4px; background:var(--accent); }
+  .consent { font-size:13px; color:var(--dim); border-left:3px solid var(--accent); padding-left:10px; }
+  .stack > * + * { margin-top:14px; }
+  code { background:#0c0e14; padding:1px 5px; border-radius:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="heart">♥</span> Commit Pulse</h1>
+  <span class="pill" id="source">…</span>
+  <span class="pill" id="status">…</span>
+  <span style="flex:1"></span>
+  <button id="toggle">Pause camera</button>
+</header>
+<main>
+  <section class="stack">
+    <div class="card">
+      <div class="dim">Right now</div>
+      <div class="row">
+        <div><span class="big" id="pulse">—</span><span class="unit">bpm</span></div>
+        <div><span class="big" style="font-size:40px" id="breath">—</span><span class="unit">br/min</span></div>
+      </div>
+      <div class="mood" id="mood">waiting for a steady face…</div>
+      <div class="hint" id="hint"></div>
+      <div class="dim" id="stamp" style="margin-top:8px"></div>
+    </div>
+    <div class="card stack">
+      <div class="dim">Repository</div>
+      <input id="repo" placeholder="C:\path\to\your\repo">
+      <div class="row" style="gap:8px">
+        <button class="primary" id="install">Install commit hook</button>
+        <button id="map">Stress map</button>
+        <button id="uninstall">Remove hook</button>
+      </div>
+      <div class="dim" id="repo-msg"></div>
+    </div>
+    <div class="card consent">
+      <b>Consent &amp; data.</b> The camera is only on while this window says <i>measuring</i>; pause it any time.
+      Frames are processed on this machine by the SmartSpectra SDK and are never stored.
+      Only three short trailers (<code>Heart-Rate</code>, <code>Breathing-Rate</code>, <code>Commit-Pulse</code>) are added to commits <i>you</i> make in repos where <i>you</i> installed the hook.
+      Remove the hook or <code>git commit --no-verify</code> to skip it. SDK telemetry is off by default.
+      Wellness and fun only; not a medical device.
+    </div>
+  </section>
+  <section class="stack">
+    <div class="card">
+      <div class="dim">Last 5 minutes</div>
+      <canvas id="chart" width="900" height="170"></canvas>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div><b>Stress map</b> <span class="dim">files whose commits came with a faster pulse than your baseline</span></div>
+        <div class="dim" id="baseline"></div>
+      </div>
+      <table id="files"><thead><tr><th>File</th><th>Commits</th><th>Avg pulse</th><th>vs baseline</th><th></th></tr></thead><tbody></tbody></table>
+      <canvas id="timeline" width="900" height="150" style="margin-top:14px"></canvas>
+    </div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const repoInput = $('repo');
+repoInput.value = localStorage.getItem('repo') || '';
+repoInput.addEventListener('change', () => localStorage.setItem('repo', repoInput.value));
+
+function line(canvas, series, color, lo, hi) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const pts = series.filter((p) => p.v != null);
+  if (pts.length < 2) return;
+  const t0 = pts[0].x, t1 = pts[pts.length - 1].x || t0 + 1;
+  ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+  pts.forEach((p, i) => {
+    const x = 10 + ((p.x - t0) / Math.max(1, t1 - t0)) * (W - 20);
+    const y = H - 10 - ((p.v - lo) / (hi - lo)) * (H - 20);
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+}
+
+function grid(canvas) {
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = '#262b38'; ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) { const y = (canvas.height / 4) * i; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
+}
+
+async function tick() {
+  try {
+    const now = await (await fetch('/now')).json();
+    $('source').textContent = now.source === 'simulated' ? 'SIMULATED readings (dev mode)' : 'live camera · SmartSpectra';
+    $('source').className = 'pill' + (now.source === 'simulated' ? ' sim' : '');
+    $('status').textContent = now.status;
+    $('pulse').textContent = now.live.pulse ?? '—';
+    $('breath').textContent = now.live.breathing ?? '—';
+    $('mood').textContent = now.ready ? `mood: ${now.mood}` : 'collecting a steady reading…';
+    $('hint').textContent = now.error || now.hint || '';
+    $('stamp').textContent = now.ready
+      ? `Next commit gets: Heart-Rate ${now.pulse} bpm · Breathing-Rate ${now.breathing ?? '—'} /min (median of ${now.seconds}s)`
+      : 'Commits made now are left unstamped.';
+    $('toggle').textContent = now.paused ? 'Resume camera' : 'Pause camera';
+    const hist = await (await fetch('/history')).json();
+    const c = $('chart'); grid(c);
+    line(c, hist.map((h) => ({ x: h.t, v: h.pulse })), '#ff5c7a', 40, 140);
+    line(c, hist.map((h) => ({ x: h.t, v: h.breathing })), '#58a6ff', 0, 40);
+  } catch {}
+}
+setInterval(tick, 1000); tick();
+
+$('toggle').onclick = async () => {
+  const paused = $('toggle').textContent.startsWith('Resume');
+  await fetch(paused ? '/resume' : '/pause', { method: 'POST' });
+  tick();
+};
+
+async function repoCall(method, path) {
+  const repo = repoInput.value.trim();
+  if (!repo) { $('repo-msg').textContent = 'Enter a repository path first.'; return null; }
+  const r = await fetch(`${path}?repo=${encodeURIComponent(repo)}`, { method });
+  const j = await r.json();
+  if (j.error) { $('repo-msg').textContent = j.error; return null; }
+  return j;
+}
+
+$('install').onclick = async () => {
+  const j = await repoCall('POST', '/install-hook');
+  if (j) $('repo-msg').textContent = `Hook installed${j.chainedPrevious ? ' (your existing hook still runs first)' : ''}. Your next commit will be stamped.`;
+};
+$('uninstall').onclick = async () => {
+  const j = await repoCall('POST', '/uninstall-hook');
+  if (j) $('repo-msg').textContent = 'Hook removed. Existing commit trailers stay in history.';
+};
+$('map').onclick = async () => {
+  const j = await repoCall('GET', '/stress-map');
+  if (!j) return;
+  $('baseline').textContent = j.baseline == null ? 'no stamped commits yet' : `your baseline: ${j.baseline} bpm · ${j.stampedCommits}/${j.totalCommits} commits stamped`;
+  const tbody = $('files').querySelector('tbody');
+  const maxDelta = Math.max(1, ...j.files.map((f) => Math.abs(f.delta)));
+  const esc = (s) => String(s).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+  tbody.innerHTML = j.files.map((f) => `<tr><td>${esc(f.file)}</td><td>${f.commits}</td><td>${f.avgPulse}</td>
+    <td style="color:${f.delta > 0 ? '#ff5c7a' : '#3fb950'}">${f.delta > 0 ? '+' : ''}${f.delta} bpm</td>
+    <td style="width:30%"><div class="bar" style="width:${Math.max(4, (Math.abs(f.delta) / maxDelta) * 100)}%;background:${f.delta > 0 ? '#ff5c7a' : '#3fb950'}"></div></td></tr>`).join('');
+  const c = $('timeline'); grid(c);
+  line(c, j.timeline.map((p, i) => ({ x: i, v: p.pulse })), '#ff5c7a', 40, 140);
+};
+</script>
+</body>
+</html>
