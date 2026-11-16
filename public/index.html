@@ -74,9 +74,15 @@
     </div>
   </section>
   <section class="stack">
-    <div class="card">
-      <div class="dim">Last 5 minutes</div>
-      <canvas id="chart" width="900" height="170"></canvas>
+    <div class="card" style="display:flex;gap:16px;align-items:stretch">
+      <figure id="camwrap" hidden style="margin:0;flex:0 0 240px">
+        <img id="cam" alt="Local camera preview" style="width:240px;height:180px;object-fit:cover;border-radius:8px;display:block;background:#0c0e14">
+        <figcaption class="dim" style="font-size:12px;margin-top:4px">camera · local preview, never stored</figcaption>
+      </figure>
+      <div style="flex:1;min-width:0">
+        <div class="dim">Last 5 minutes</div>
+        <canvas id="chart" width="900" height="170"></canvas>
+      </div>
     </div>
     <div class="card">
       <div class="row" style="justify-content:space-between">
@@ -130,6 +136,8 @@ async function tick() {
       ? `Next commit gets: Heart-Rate ${now.pulse} bpm · Breathing-Rate ${now.breathing ?? '—'} /min (median of ${now.seconds}s)`
       : 'Commits made now are left unstamped.';
     $('toggle').textContent = now.paused ? 'Resume camera' : 'Pause camera';
+    if (now.preview && $('camwrap').hidden) { $('cam').src = '/camera.mjpeg?' + Date.now(); $('camwrap').hidden = false; }
+    if (!now.preview && !$('camwrap').hidden) { $('cam').removeAttribute('src'); $('camwrap').hidden = true; }
     const hist = await (await fetch('/history')).json();
     const c = $('chart'); grid(c);
     line(c, hist.map((h) => ({ x: h.t, v: h.pulse })), '#ff5c7a', 40, 140);

@@ -51,7 +51,7 @@ No webcam, or a virtual webcam driver that hands the SDK blank frames? (DroidCam
 COMMIT_PULSE_STREAM="http://<phone-ip>:4747/video?640x480" node server.js
 ```
 
-`lib/mjpeg.js` splits the multipart stream into JPEGs, decodes the newest one with `jpeg-js`, and pushes RGB frames through SmartSpectra's custom input (`useCustomInput()` + `sendFrame()`) with real capture timestamps. Close the DroidCam PC client first: the phone app serves one client at a time. Keep it at 640×480: the SDK needs at least 25 fps, and decoding 720p in pure JavaScript is too slow for that on one core.
+`lib/mjpeg.js` splits the multipart stream into JPEGs, decodes the newest one with `jpeg-js`, and pushes RGB frames through SmartSpectra's custom input (`useCustomInput()` + `sendFrame()`) with real capture timestamps. In this mode the dashboard also shows a small **local camera preview** so you can check your framing: the server keeps only the newest JPEG in memory and relays it to `127.0.0.1` viewers; nothing is written to disk, and **Pause camera** ends the preview too. Close the DroidCam PC client first: the phone app serves one client at a time. Keep it at 640×480: the SDK needs at least 25 fps, and decoding 720p in pure JavaScript is too slow for that on one core.
 
 `node server.js --simulate` produces clearly labelled synthetic readings for UI work without a camera. It is never used for real stamps.
 

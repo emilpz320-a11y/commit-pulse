@@ -60,6 +60,28 @@ function record(pulse, breathing) {
 let sdk = null;
 let streamReader = null;
 
+// Local camera preview (stream input only): the newest JPEG is kept in memory
+// and relayed to dashboard viewers on 127.0.0.1. Nothing is written to disk,
+// and pausing the camera ends every preview connection.
+const preview = {
+  clients: new Set(),
+  lastSent: 0,
+  publish(jpegBytes) {
+    const t = Date.now();
+    if (!this.clients.size || t - this.lastSent < 66) return; // ~15 fps is plenty for a preview
+    this.lastSent = t;
+    for (const res of this.clients) {
+      res.write(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpegBytes.length}\r\n\r\n`);
+      res.write(jpegBytes);
+      res.write('\r\n');
+    }
+  },
+  closeAll() {
+    for (const res of this.clients) res.end();
+    this.clients.clear();
+  },
+};
+
 function lastValue(arr) {
   return arr && arr.length ? arr[arr.length - 1].value : null;
 }
@@ -127,8 +149,10 @@ async function startCamera() {
       const live = sdk;
       streamReader = readMjpeg(
         streamUrl,
-        (rgb, w, h, ts) => {
-          if (sdk === live) live.sendFrame(rgb, w, h, w * 3, PixelFormat.kRGB, ts);
+        (rgb, w, h, ts, jpegBytes) => {
+          if (sdk !== live) return;
+          live.sendFrame(rgb, w, h, w * 3, PixelFormat.kRGB, ts);
+          preview.publish(jpegBytes);
         },
         {
           // SmartSpectra needs >= 25 fps; only drop frames that arrive faster than 60 fps.
@@ -155,6 +179,7 @@ async function startCamera() {
 }
 
 async function stopCamera() {
+  preview.closeAll();
   if (streamReader) {
     streamReader.stop();
     streamReader = null;
@@ -223,6 +248,7 @@ function nowPayload() {
     hint: state.hint,
     live: { pulse: state.lastPulse, breathing: state.lastBreathing },
     error: state.error,
+    preview: Boolean(streamReader) && !state.paused,
   };
 }
 
@@ -238,6 +264,13 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8'), 'text/html; charset=utf-8');
     }
     if (req.method === 'GET' && url.pathname === '/now') return send(res, 200, nowPayload());
+    if (req.method === 'GET' && url.pathname === '/camera.mjpeg') {
+      if (!streamReader || state.paused) return send(res, 404, { error: 'no live preview' });
+      res.writeHead(200, { 'Content-Type': 'multipart/x-mixed-replace; boundary=frame', 'Cache-Control': 'no-store' });
+      preview.clients.add(res);
+      req.on('close', () => preview.clients.delete(res));
+      return;
+    }
     if (req.method === 'GET' && url.pathname === '/history') return send(res, 200, state.history);
     if (req.method === 'POST' && url.pathname === '/pause') {
       state.paused = true;
